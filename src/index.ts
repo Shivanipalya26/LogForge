@@ -1,6 +1,7 @@
 import express, { Request, Response } from 'express'
 import client from 'prom-client'
 import { spawn } from 'child_process'
+import dashboardServer from './dashboard.js'
 
 const register = new client.Registry()
 
@@ -28,8 +29,8 @@ const failedEvents = new client.Counter({
 });
 
 const minioObjectCount = new client.Gauge({
-    name: "kafka_consumer_lag",
-    help: "Kafka consumer lag in messages",
+    name: "minio_objects_count",
+    help: "Number of objects in MinIO storage",
 });
 
 const kafkaLagMetric = new client.Gauge({
