@@ -24,8 +24,12 @@ app.use(express.static('public'));
 
 // add a test route to verify server is running
 app.get('/', (req, res) => {
-    res.send(`${fs.readFileSync('./public/index.html', 'utf8')}
-    <script type="text/javascript">${clientScript}</script>`)
+    try {
+        const htmlContent = fs.readFileSync('./public/index.html', 'utf8');
+        res.send(htmlContent);
+    } catch (error) {
+        res.status(500).send('Error loading dashboard');
+    }
 });
 
 app.get('/health', (req, res) => {
@@ -97,28 +101,48 @@ io.on('connection', (socket) => {
     });
 });
 
-// start consuming kafka messages to broadcast updates
-const consumer = kafka.consumer({ groupId: 'dashboard-group' });
-await consumer.connect();
-await consumer.subscribe({ topic: 'clickstream' });
-await consumer.run({
-    eachMessage: async ({ message }) => {
-        const event = JSON.parse(message.value!.toString());
-        io.emit('event', event);
-        eventsByType.inc({ event_type: event.event_type });
-    },
-});
+// initialize connections and start consuming
+async function initializeServices() {
+    try {
+        // connect to PostgreSQL
+        await pgClient.connect();
+        console.log('Connected to PostgreSQL');
 
-// after client initialisation
-await pgClient.connect();
-console.log('Connected to postgresSQL');
+        // Start consuming Kafka messages to broadcast updates
+        const consumer = kafka.consumer({ groupId: 'dashboard-group' });
+        await consumer.connect();
+        console.log('Connected to Kafka consumer');
+        
+        await consumer.subscribe({ topic: 'clickstream' });
+        console.log('Subscribed to clickstream topic');
+        
+        await consumer.run({
+            eachMessage: async ({ message }) => {
+                try {
+                    const event = JSON.parse(message.value!.toString());
+                    console.log('Broadcasting event:', event);
+                    io.emit('event', event);
+                    eventsByType.inc({ event_type: event.event_type });
+                } catch (error) {
+                    console.error('Error processing message:', error);
+                }
+            },
+        });
+    } catch (error) {
+        console.error('Error initializing services:', error);
+    }
+}
 
 // start the server only when connections are established
 export function startServer(port: number) {
     return new Promise((resolve) => {
         server.listen(port, '0.0.0.0', () => {
-            console.log(`Dashboard server running on http://localhost/${port}`);
-            console.log('Serving static files from : ', process.cwd() + '/public');
+            console.log(`Dashboard server running on http://localhost:${port}`);
+            console.log('Serving static files from:', process.cwd() + '/public');
+            
+            // Initialize services after server starts
+            initializeServices();
+            
             resolve(server);
         });
     });
@@ -126,58 +150,59 @@ export function startServer(port: number) {
 
 export default { startServer };
 
-interface EventStats {
-    click: number;
-    scroll: number;
-    purchase: number;
-    view: number;
-}
+// interface EventStats {
+//     click: number;
+//     scroll: number;
+//     purchase: number;
+//     view: number;
+// }
 
 // client-side code to be injected into index.html
-const clientScript = `
-// Add Plotly type definition
-declare const Plotly: any;
 
-const socket = io();
-const eventsLog = document.getElementsById('events-log');
-let eventStats: EventStats = {
-    click: 0,
-    scroll: 0,
-    purchase: 0,
-    view: 0
-};
+// const clientScript = `
+// // Add Plotly type definition
+// declare const Plotly: any;
 
-socket.on('event', (event) => {
-    const logEntry = document.createElement('div');
-    logEntry.className = 'py-1 border-b';
-    logEntry.textContent = \`\${new Date().toString()} - \${event.event_type} - \${event.url}\`;
-    eventsLog?.prepend(logEntry);
+// const socket = io();
+// const eventsLog = document.getElementsById('events-log');
+// let eventStats: EventStats = {
+//     click: 0,
+//     scroll: 0,
+//     purchase: 0,
+//     view: 0
+// };
 
-    eventStats[event.event_type]++;
-    updateCharts();
-});
+// socket.on('event', (event) => {
+//     const logEntry = document.createElement('div');
+//     logEntry.className = 'py-1 border-b';
+//     logEntry.textContent = \`\${new Date().toString()} - \${event.event_type} - \${event.url}\`;
+//     eventsLog?.prepend(logEntry);
 
-function updateCharts() {
-    const pieData = [{
-        values: Object.values(eventStats),
-        labels: Object.keys(eventStats),
-        type: 'pie
-    }];
+//     eventStats[event.event_type]++;
+//     updateCharts();
+// });
 
-    Plotly.newPlot('event-distribution', pieData);
+// function updateCharts() {
+//     const pieData = [{
+//         values: Object.values(eventStats),
+//         labels: Object.keys(eventStats),
+//         type: 'pie
+//     }];
 
-    fetch('/api/stats)
-        .then(res => res.json())
-        .then(stats => {
-            const metricsData = [{
-                type: 'bar',
-                x: ['Processed Events', 'Pending Scroll Events'],
-                y: [stats.events.length, stats.pendingScrolls]
-            }];
-            Plotly.newPlot('pipeline-metrics', metricsData);
-        });
-}
+//     Plotly.newPlot('event-distribution', pieData);
 
-updateCharts();
-setInterval(updateCharts, 5000);
-`
+//     fetch('/api/stats)
+//         .then(res => res.json())
+//         .then(stats => {
+//             const metricsData = [{
+//                 type: 'bar',
+//                 x: ['Processed Events', 'Pending Scroll Events'],
+//                 y: [stats.events.length, stats.pendingScrolls]
+//             }];
+//             Plotly.newPlot('pipeline-metrics', metricsData);
+//         });
+// }
+
+// updateCharts();
+// setInterval(updateCharts, 5000);
+// `

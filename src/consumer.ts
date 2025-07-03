@@ -47,26 +47,33 @@ async function createMinIOBucket() {
 }
 
 async function createTable() {
-    const query = `
+    // create events table for non-scroll events
+    const eventsQuery = `
     CREATE TABLE IF NOT EXISTS events (
-        user_id INT, 
+        user_id INT,
         event_type TEXT,
         url TEXT,
         timestamp BIGINT
-    );`
-    await pgClient.query(query);
-    console.log("Table 'events' ensured to exist");
+    );`;
+    await pgClient.query(eventsQuery);
+
+    // create scroll_events table for aggregated scroll events
+    const scrollQuery = `
+    CREATE TABLE IF NOT EXISTS scroll_events (
+        url TEXT PRIMARY KEY,
+        scroll_count INT DEFAULT 0,
+        user_id INT,
+        timestamp BIGINT
+    );`;
+    await pgClient.query(scrollQuery);
+
+    console.log("Tables 'events' and 'scroll_events' exist");
 }
 
-async function storeMinIO(event: Object) {
-    const objectName = `scroll_event_${Date.now()}.json`;
+async function storeEventInMinIO(event: any) {
+    const objectName = `event_${event.event_type}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.json`;
     await minioClient.putObject("clickstream-storage", objectName, JSON.stringify(event));
-}
-
-async function storeToPostgreSQL(event: any) {
-    await pgClient.query("INSERT INTO events (user_id, event_type, url, timestamp) VALUES ($1, $2, $3, $4)",
-        [event.user_id, event.event_type, event.url, event.timestamp]
-    );
+    console.log(`Stored event in MinIO: ${objectName}`);
 }
 
 async function run() {
@@ -84,11 +91,8 @@ async function run() {
 
                 eventsByType.inc({ event_type: event.event_type });
 
-                if(event.event_type === "scroll") {
-                    await storeMinIO(event);
-                } else {
-                    await storeToPostgreSQL(event);
-                }
+                await storeEventInMinIO(event);
+
                 end();  // record processing duration
             } catch (error) {
                 failedEvents.inc({ stage: 'consumer' });
@@ -97,3 +101,5 @@ async function run() {
         }
     })
 }
+
+run();
