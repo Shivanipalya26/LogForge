@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Data Pipeline Dashboard</title>
+    <script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-3xl font-bold mb-8">Data Pipeline Dashboard</h1>
+        
+        <!-- navigation -->
+        <div class="mb-6">
+            <a href="/metrics.html" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
+                View Metrics
+            </a>
+        </div>
+        
+        <!-- real-time events -->
+        <div class="bg-white rounded-lg shadow p-6 mb-8">
+            <h2 class="text-xl font-semibold mb-4">Real-time Events</h2>
+            <div id="events-log" class="h-48 overflow-y-auto font-mono text-sm bg-gray-50 p-4 rounded"></div>
+        </div>
+
+        <!-- statistics -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-xl font-semibold mb-4">Event Distribution</h2>
+                <div id="event-distribution"></div>
+            </div>
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-xl font-semibold mb-4">Pipeline Metrics</h2>
+                <div id="pipeline-metrics"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        const connectionStatus = document.getElementById('connection-status');
+        
+        const eventsLog = document.getElementById('events-log');
+        const eventCounts = {};
+        
+        socket.on('event', (data) => {
+            console.log('Received event:', data);
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.className = 'mb-1 text-xs';
+            logEntry.innerHTML = `<span class="text-gray-500">[${timestamp}]</span> <span class="text-blue-600">${data.event_type}</span> by user ${data.user_id} on ${data.url}`;
+            eventsLog.appendChild(logEntry);
+            
+            eventsLog.scrollTop = eventsLog.scrollHeight;
+            
+            eventCounts[data.event_type] = (eventCounts[data.event_type] || 0) + 1;
+            updateCharts();
+        });
+        
+        function updateCharts() {
+            const eventTypes = Object.keys(eventCounts);
+            const eventValues = Object.values(eventCounts);
+            
+            const pieData = [{
+                values: eventValues,
+                labels: eventTypes,
+                type: 'pie',
+                hole: 0.4
+            }];
+            
+            Plotly.newPlot('event-distribution', pieData, {
+                title: 'Event Types Distribution',
+                height: 300
+            });
+            
+            const metricsData = [{
+                x: eventTypes,
+                y: eventValues,
+                type: 'bar',
+                marker: {
+                    color: 'rgba(55, 128, 191, 0.7)'
+                }
+            }];
+            
+            Plotly.newPlot('pipeline-metrics', metricsData, {
+                title: 'Events Count by Type',
+                height: 300,
+                xaxis: { title: 'Event Type' },
+                yaxis: { title: 'Count' }
+            });
+        }
+        
+        async function fetchMetrics() {
+            try {
+                const response = await fetch('/metrics');
+                const data = await response.json();
+                console.log('Metrics:', data);
+            } catch (error) {
+                console.error('Error fetching metrics:', error);
+            }
+        }
+        
+        setInterval(fetchMetrics, 10000);
+        fetchMetrics();
+    </script>
+</body>
+</html>

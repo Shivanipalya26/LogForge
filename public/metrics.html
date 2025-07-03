@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Pipeline Metrics</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-3xl font-bold mb-8 flex items-center">
+            <i class="fas fa-chart-line mr-3"></i>
+            Pipeline Metrics
+            <a href="/" class="ml-4 text-sm text-blue-500 hover:text-blue-700">(Back to Dashboard)</a>
+        </h1>
+        
+        <div class="mb-6">
+            <button id="refresh-btn" class="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded">
+                <i class="fas fa-sync-alt mr-2"></i>Refresh Metrics
+            </button>
+        </div>
+        
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6" id="metrics-container">
+            <!-- metrics will be inserted here dynamically -->
+        </div>
+    </div>
+
+    <script>
+        const metricsContainer = document.getElementById('metrics-container');
+        const refreshBtn = document.getElementById('refresh-btn');
+        
+        // fetch and display metrics
+        async function fetchAndDisplayMetrics() {
+            try {
+                refreshBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Loading...';
+                refreshBtn.disabled = true;
+                
+                const response = await fetch('/metrics');
+                const metricsText = await response.text();
+                
+                // parse prometheus metrics
+                const metrics = parsePrometheusMetrics(metricsText);
+                displayMetrics(metrics);
+                
+                refreshBtn.innerHTML = '<i class="fas fa-sync-alt mr-2"></i>Refresh Metrics';
+                refreshBtn.disabled = false;
+            } catch (error) {
+                console.error('Error fetching metrics:', error);
+                metricsContainer.innerHTML = `
+                    <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+                        <strong>Error:</strong> Could not fetch metrics. ${error.message}
+                    </div>
+                `;
+                refreshBtn.innerHTML = '<i class="fas fa-sync-alt mr-2"></i>Refresh Metrics';
+                refreshBtn.disabled = false;
+            }
+        }
+        
+        // parse prometheus metrics format
+        function parsePrometheusMetrics(text) {
+            const metrics = {};
+            const lines = text.split('\n');
+            
+            for (const line of lines) {
+                if (line.startsWith('#') || line.trim() === '') continue;
+                
+                const [metricPart, value] = line.split(' ');
+                if (!metricPart || !value) continue;
+                
+                const [name, labelsPart] = metricPart.split('{');
+                const labels = labelsPart ? labelsPart.replace('}', '') : '';
+                
+                if (!metrics[name]) metrics[name] = [];
+                metrics[name].push({
+                    labels: labels,
+                    value: parseFloat(value)
+                });
+            }
+            
+            return metrics;
+        }
+        
+        function displayMetrics(metrics) {
+            metricsContainer.innerHTML = '';
+            
+            Object.entries(metrics).forEach(([name, data]) => {
+                const card = document.createElement('div');
+                card.className = 'bg-white rounded-lg shadow p-6';
+                
+                const total = data.reduce((sum, item) => sum + item.value, 0);
+                const average = total / data.length;
+                
+                card.innerHTML = `
+                    <h3 class="text-lg font-semibold mb-4 flex items-center">
+                        <i class="fas fa-chart-bar mr-2 text-blue-500"></i>
+                        ${formatMetricName(name)}
+                    </h3>
+                    <div class="space-y-2">
+                        <div class="flex justify-between">
+                            <span class="text-gray-600">Total:</span>
+                            <span class="font-bold text-xl">${total.toFixed(2)}</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-600">Average:</span>
+                            <span class="font-bold">${average.toFixed(2)}</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-600">Count:</span>
+                            <span class="font-bold">${data.length}</span>
+                        </div>
+                    </div>
+                    <div id="chart-${name}" class="mt-4" style="height: 200px;"></div>
+                `;
+                
+                metricsContainer.appendChild(card);
+                
+                if (data.length > 1) {
+                    createChart(name, data);
+                }
+            });
+        }
+        
+        function createChart(name, data) {
+            const chartData = [{
+                x: data.map((item, index) => item.labels || `Point ${index + 1}`),
+                y: data.map(item => item.value),
+                type: 'bar',
+                marker: {
+                    color: 'rgba(55, 128, 191, 0.7)'
+                }
+            }];
+            
+            Plotly.newPlot(`chart-${name}`, chartData, {
+                title: `${formatMetricName(name)} Distribution`,
+                height: 200,
+                margin: { t: 30, b: 40, l: 40, r: 20 }
+            });
+        }
+        
+        function formatMetricName(name) {
+            return name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+        }
+        
+        refreshBtn.addEventListener('click', fetchAndDisplayMetrics);
+        
+        setInterval(fetchAndDisplayMetrics, 30000);
+        
+        fetchAndDisplayMetrics();
+    </script>
+</body>
+</html>
